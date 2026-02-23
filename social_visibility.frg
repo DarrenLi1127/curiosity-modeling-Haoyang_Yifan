@@ -96,7 +96,7 @@ pred known_scenario {
         Alice.friends[Bob] = True
         all u: User | Charlie.friends[u] != True
         
-        // 【Alice 的全局开关设定】
+        //Alice 的全局开关设定
         Alice.stranger_see_recent = True
         Alice.moments_closed = False     // 没关朋友圈
         Alice.limit_recent_10 = True     // 开启了“仅展示最近十条”
