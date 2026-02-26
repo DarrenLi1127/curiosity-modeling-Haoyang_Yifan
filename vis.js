@@ -29,6 +29,10 @@ html += `<div style="display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 3
 users.forEach(u => {
     // 提取当前用户的配置与关系
     let friendsList = [];
+    let blockedList = [];
+    fetchTuples(blocked).forEach(t => {
+        if (t[0] === u && t[2].includes('True')) blockedList.push(t[1]);
+    });
     fetchTuples(friends).forEach(t => {
         // Froglet 里的 pfunc User -> Boolean 解析出来是三元组 [User, User, Boolean]
         if (t[0] === u && t[2].includes('True')) friendsList.push(t[1]);
@@ -44,6 +48,7 @@ users.forEach(u => {
         <h4 style="margin: 0 0 10px 0; color: #0056b3; font-size: 18px;">👤 ${u}</h4>
         <div style="font-size: 13px; line-height: 1.6;">
             <div><b>Friends:</b> ${friendsList.length > 0 ? friendsList.join(', ') : '<span style="color:#999">None</span>'}</div>
+            <div><b>Blocked:</b> ${blockedList.length > 0 ? `<span style="color:red">` + blockedList.map(b=>b.split('$')[0]).join(', ') + `</span>` : '<span style="color:#999">None</span>'}</div>
             <hr style="border: 0; border-top: 1px solid #ccc; margin: 8px 0;">
             <div><b>Moments Closed:</b> <span style="color: ${isClosed.includes('True') ? 'red' : 'green'}">${isClosed.split('$')[0]}</span></div>
             <div><b>Limit Recent 10:</b> ${limit10.split('$')[0]}</div>
