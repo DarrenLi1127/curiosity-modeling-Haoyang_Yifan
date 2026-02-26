@@ -21,6 +21,14 @@ test suite for wellformed {
                 wellformed
             }
         } for 5 Int is unsat
+
+        friend_and_blocked: {
+            some disj u1, u2: User | {
+                u1.friends[u2] = True
+                u1.blocked[u2] = True
+                wellformed
+            }
+        } for 5 Int is unsat
     }
 }
 
@@ -56,6 +64,44 @@ test suite for canSee {
                 
                 // allowed_f能看 且 blocked_f看不了
                 canSee[allowed_f, p] and not canSee[blocked_f, p]
+            }
+        } for 5 Int is sat
+
+        // 被拉黑的人即使用户允许陌生人查看，也无法查看公开贴
+        blocklist_absolute_defense: {
+            wellformed
+            some disj owner, hater: User, p: Post | {
+                owner.blocked[hater] = True // owner把hater拉黑了
+                
+                owner.moments_closed = False
+                owner.stranger_see_recent = True // 允许陌生人看
+                
+                p.author = owner
+                p.visibility = Public // 哪怕是公开贴
+                isRecent[p]           // 哪怕是最新的一条
+                
+                // hater依然看不了！如果他能看，这个用例就会sat（变成unsat代表防御成功）
+                canSee[hater, p]
+            }
+        } for 5 Int is unsat 
+        
+        // 仅好友可见测试 (FriendsOnly)
+        friends_only_logic: {
+            wellformed
+            some disj owner, friend, stranger: User, p: Post | {
+                owner.friends[friend] = True
+                owner.friends[stranger] != True
+                
+                owner.moments_closed = False
+                owner.limit_recent_10 = False
+                owner.stranger_see_recent = True // 即便允许陌生人看十条
+                
+                p.author = owner
+                p.visibility = FriendsOnly // 但这篇帖子是“仅好友”
+                isRecent[p]
+                
+                // 好友能看，陌生人不能看
+                canSee[friend, p] and not canSee[stranger, p]
             }
         } for 5 Int is sat
     }
