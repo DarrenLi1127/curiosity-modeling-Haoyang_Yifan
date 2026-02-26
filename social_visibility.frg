@@ -1,134 +1,151 @@
 #lang forge/froglet
 
+/* Social Media Visibility Model
+ * A formal model verifying the access control logic of a social media feature. 
+ * It handles complex privacy interactions between global account settings, social relationships (friends/block/mute), 
+ * and granular post-level visibility (public/private/whitelist/blacklist).
+ */
+
 option run_sterling "vis.js"
 
 abstract sig Boolean {}
 one sig True, False extends Boolean {}
 
-// 朋友圈可见度：公开、仅好友、指定好友、私密
+// social visibility： including public, friends-only, specific friends, exclude friends, private
 abstract sig Visibility {}
-one sig Public, FriendsOnly, SpecificFriends, Private extends Visibility {}
+one sig Public, FriendsOnly, SpecificFriends, ExcludeFriends, Private extends Visibility {}
 
 sig User {
-    // 好友关系
     friends: pfunc User -> Boolean,
-    // 黑名单关系
-    blocked: pfunc User -> Boolean,
+    blocked: pfunc User -> Boolean,    // list of users I have blocked
+    muted: pfunc User -> Boolean,      // list of users whose moments I have muted
     
-    // 账号全局开关
-    stranger_see_recent: one Boolean,  // 允许陌生人看十条
-    moments_closed: one Boolean,       // 一键关闭/停用朋友圈
-    limit_recent_10: one Boolean       // 仅向好友展示最近十条
+    // account settings
+    stranger_see_recent: one Boolean,  // allows strangers to see recent posts
+    moments_closed: one Boolean,       // global switch to turn off moments
+    limit_recent_10: one Boolean       // only allow recent 10 posts to be visible
 }
 
 sig Post {
     author: one User,
     visibility: one Visibility,
-    allowed_viewers: pfunc User -> Boolean,
+    allowed_viewers: pfunc User -> Boolean,  // SpecificFriends
+    excluded_viewers: pfunc User -> Boolean, // ExcludeFriends
     timestamp: one Int
 }
 
--- 约束条件
+
 
 pred wellformed {
-    all u: User | u.friends[u] != True // 不能是自己的好友
-    all u1, u2: User | u2.friends[u1] = True implies u1.friends[u2] = True // 好友关系对称
+    all u: User | u.friends[u] != True // can't be friend with oneself
+    all u1, u2: User | u2.friends[u1] = True implies u1.friends[u2] = True // friendship is mutual
     
-    // 黑名单的逻辑约束
-    all u: User | u.blocked[u] != True // 不能把自己拉黑
-    all u1, u2: User | u1.blocked[u2] = True implies u1.friends[u2] != True // 拉黑后自动解除好友关系（或不允许同时是好友又是黑名单）
+    // blocklist
+    all u: User | u.blocked[u] != True // can't block oneself
+    all u1, u2: User | u1.blocked[u2] = True implies u1.friends[u2] != True // can't be friend with someone you blocked
     
-    all p: Post | p.timestamp >= 0 // 时间戳非负
-    all disj p1, p2: Post | (p1.author = p2.author) implies p1.timestamp != p2.timestamp // 同一作者的帖子时间戳不同
+    // mutelist
+    all u: User | u.muted[u] != True // can't mute oneself
     
-    // 朋友圈可见度和 allowed_viewers 的约束：
+    all p: Post | p.timestamp >= 0 
+    all disj p1, p2: Post | (p1.author = p2.author) implies p1.timestamp != p2.timestamp // can't have two posts with the same timestamp from the same author
+    
     all p: Post, u: User | (p.visibility = SpecificFriends and p.allowed_viewers[u] = True) implies p.author.friends[u] = True
     all p: Post, u: User | p.visibility != SpecificFriends implies p.allowed_viewers[u] != True
+    
+    // you can only exclude friends, and if you exclude someone, they must be your friend
+    all p: Post, u: User | (p.visibility = ExcludeFriends and p.excluded_viewers[u] = True) implies p.author.friends[u] = True
+    all p: Post, u: User | p.visibility != ExcludeFriends implies p.excluded_viewers[u] != True
 }
 
--- 核心逻辑：谁到底能看
-
+// isRecent：only the most recent 10 posts from the same author are considered recent. 
 pred isRecent[p: Post] {
-    // 是否算“最近十条”
     #{other_p: Post | other_p.author = p.author and other_p.timestamp > p.timestamp} < 10
 }
 
 pred canSee[viewer: User, p: Post] {
-    // 是不是作者本人？自己永远能看自己的帖子
+    // you can always see your own posts
     viewer = p.author 
     or 
     (
-        // 如果不是作者本人，必须经过全局开关的毒打
         viewer != p.author 
         
-        // 黑名单的一票否决：如果查看者在作者的黑名单里，绝对看不了
+        // if it's not your own post, you must not be blocked by the author
         and p.author.blocked[viewer] != True
         
-        // 作者是不是一键关闭了朋友圈？（一票否决）
+        // if I have muted the author, I can't see their posts
+        and viewer.muted[p.author] != True
+        
+        // if moments is closed, no one can see the posts
         and p.author.moments_closed = False 
+        and (p.author.limit_recent_10 = False or isRecent[p]) // check the visibility settings
         
-        // 如果作者没有开启“仅展示最近十条”，那就不受时间戳限制；如果开启了，就只能看最近十条
-        and (p.author.limit_recent_10 = False or isRecent[p]) 
-        
-        // 帖子本身的独立权限
         and 
         (
-            // 好友视角的独立权限判断
+            // friend's view
             (
                 p.author.friends[viewer] = True and ( 
                     p.visibility = Public 
                     or p.visibility = FriendsOnly 
                     or (p.visibility = SpecificFriends and p.allowed_viewers[viewer] = True) 
+                    or (p.visibility = ExcludeFriends and p.excluded_viewers[viewer] != True)
                 )
             )
             or 
-            // 陌生人视角的独立权限判断
+            // stranger's view
             (
                 p.author.friends[viewer] != True and ( 
                     p.visibility = Public 
                     and p.author.stranger_see_recent = True 
-                    and isRecent[p] // 陌生人本来就有10条限制
+                    and isRecent[p] 
                 )
             )
         )
     )
 }
 
--- 场景测试
+-- test cases for the known scenario 
+// Scenario Summary: Tests visibility of 4 different posts by Alice against 3 distinct viewers:
+// 1. Bob (Friend, but muted Alice): Sees NOTHING due to receiver-side block.
+// 2. Dave (Friend): Sees 'Public' and 'SpecificFriends' (he is allowed), but NOT 'ExcludeFriends' (he is explicitly excluded).
+// 3. Charlie (Stranger): Sees ONLY the recent 'Public' post (due to Alice's 'stranger_see_recent' setting).
 
 pred known_scenario {
-    some disj Alice, Bob, Charlie: User |
-    some disj p_pub, p_priv, p_spec: Post | {
+    
+    some disj Alice, Bob, Charlie, Dave: User |
+    some disj p_pub, p_priv, p_spec, p_excl: Post | {
         
-        // 人物关系设定
         Bob.friends[Alice] = True
         Alice.friends[Bob] = True
+        Dave.friends[Alice] = True
+        Alice.friends[Dave] = True
         all u: User | Charlie.friends[u] != True
         
-        // 【新增】Alice 把某个无辜路人拉黑了
-        // 假设系统里有第四个人 Dave，Alice 拉黑了他
+        Bob.muted[Alice] = True
         
-        // Alice 的全局开关设定
         Alice.stranger_see_recent = True
         Alice.moments_closed = False     
         Alice.limit_recent_10 = True     
 
-        // 三条帖子测试一下
         p_pub.author = Alice and p_pub.visibility = Public and p_pub.timestamp = 10
         p_priv.author = Alice and p_priv.visibility = Private and p_priv.timestamp = 9
-        p_spec.author = Alice and p_spec.visibility = SpecificFriends and p_spec.allowed_viewers[Bob] = True and p_spec.timestamp = 8
+        p_spec.author = Alice and p_spec.visibility = SpecificFriends and p_spec.allowed_viewers[Dave] = True and p_spec.timestamp = 8
+        p_excl.author = Alice and p_excl.visibility = ExcludeFriends and p_excl.excluded_viewers[Dave] = True and p_excl.timestamp = 7
 
-        canSee[Bob, p_pub]          
+        not canSee[Bob, p_pub]          
         not canSee[Bob, p_priv]    
-        canSee[Bob, p_spec]         
+        not canSee[Bob, p_spec]         
+        not canSee[Bob, p_excl]
+
+        canSee[Dave, p_pub]
+        canSee[Dave, p_spec]
+        not canSee[Dave, p_excl]
         
         canSee[Charlie, p_pub]      
-        not canSee[Charlie, p_priv] 
-        not canSee[Charlie, p_spec] 
     }
 }
 
 run {
     wellformed
     known_scenario
-} for 5 Int, exactly 3 User, exactly 3 Post
+} for 5 Int, exactly 4 User, exactly 4 Post
