@@ -22,7 +22,7 @@ Because the default Forge graph is messy and hard to read, we wrote a custom vis
 * **`known_scenario`**: A sample situation with 4 users to show how all the rules work together.
 
 ## Testing
-We wrote tests to make sure our logic is strict and secure under all edge cases:
+To verify our model, we used Bounded Model Checking. We wrote tests to make sure our logic is strict and secure under all edge cases:
 * **Structural Tests**: Check basic rules (e.g., a blocked user cannot be a friend, and a user cannot mute themselves).
 * **Access Control Tests**: Prove that privacy rules work correctly in extreme cases (e.g., blocked or muted users absolutely cannot see posts, friends cannot see private posts, and strangers are completely blocked if the global setting is turned off).
 * **Time Limit Tests**: Ensure the "recent 10 posts" rule successfully hides older posts from both friends and strangers.
